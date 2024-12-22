@@ -12,6 +12,11 @@ A native iOS client for browsing and reading manga from MangaDex.org, built usin
 - Comprehensive search with filters for demographics, years, tags, and more
 - Support for MangaDex authentication
 
+## Bugs
+- Mangareader goes to the wrong page sometimes.
+- Sometimes the user gets disconnected.
+
+
 ## Requirements
 
 - iOS 15.0+
@@ -37,27 +42,29 @@ To use the app, you'll need:
    - Save your Client ID and Client Secret
 
 ## Project Structure
-
 ```
-MangaApp/
-├── App/
-│   └── MangaApp.swift       # Main app entry point
-├── Models/
-│   ├── Manga.swift          # Manga data models
-│   ├── Chapter.swift        # Chapter data models
-│   └── Tag.swift           # Tag and filtering models
-├── Views/
-│   ├── ContentView.swift    # Main tab view
-│   ├── MangaDetailView.swift # Manga details
-│   ├── ChapterReaderView.swift # Chapter reader
-│   └── Components/         # Reusable view components
-├── ViewModels/
-│   ├── MangaListViewModel.swift # Browse manga
-│   └── ChapterListViewModel.swift # Chapter list
-└── Services/
-    ├── MangaDexAPI.swift   # API communication
-    ├── AuthManager.swift   # Authentication
-    └── LibraryManager.swift # Library management
+└─ .
+   ├─ Manga
+   │  ├─ Assets.xcassets
+   │  │  ├─ AccentColor.colorset
+   │  │  │  └─ Contents.json
+   │  │  ├─ AppIcon.appiconset
+   │  │  │  └─ Contents.json
+   │  │  └─ Contents.json
+   │  ├─ ContentView.swift
+   │  ├─ MangaApp.swift
+   │  └─ Preview Content
+   │     └─ Preview Assets.xcassets
+   │        └─ Contents.json
+   ├─ Manga.xcodeproj
+   │  ├─ project.pbxproj
+   │  ├─ project.xcworkspace
+   │  │  └─ contents.xcworkspacedata
+   │  └─ xcuserdata
+   │     └─ erzie.xcuserdatad
+   │        └─ xcschemes
+   │           └─ xcschememanagement.plist
+   ├─ readme.md
 ```
 
 ## Features Overview
