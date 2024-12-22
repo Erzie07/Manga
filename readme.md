@@ -60,8 +60,7 @@ To use the app, you'll need:
    │     └─ erzie.xcuserdatad
    │        └─ xcschemes
    │           └─ xcschememanagement.plist
-   ├─ readme.md
-   └─ tree.txt````
+   ```
 
 ## Features Overview
 
