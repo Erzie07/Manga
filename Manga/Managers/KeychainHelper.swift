@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 class KeychainHelper {
     private let accessTokenKey = "mangadex.accessToken"
@@ -26,14 +27,27 @@ class KeychainHelper {
     }
     
     private func save(_ string: String, forKey key: String) {
-        let data = string.data(using: .utf8)!
+        guard let data = string.data(using: .utf8) else { return }
+        
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecAttrService as String: "mangadex.auth"
         ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
+        
+        var status = SecItemCopyMatching(query as CFDictionary, nil)
+        if status == errSecSuccess {
+            // Item exists, update it
+            let attributes: [String: Any] = [
+                kSecValueData as String: data
+            ]
+            SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        } else {
+            // Item doesn't exist, add it
+            SecItemAdd(query as CFDictionary, nil)
+        }
     }
     
     private func get(forKey key: String) -> String? {
@@ -41,25 +55,29 @@ class KeychainHelper {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecReturnData as String: kCFBooleanTrue!,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecAttrService as String: "mangadex.auth"
         ]
         
-        var dataTypeRef: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
         
-        if status == errSecSuccess,
-           let data = dataTypeRef as? Data,
-           let string = String(data: data, encoding: .utf8) {
-            return string
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let string = String(data: data, encoding: .utf8) else {
+            return nil
         }
-        return nil
+        
+        return string
     }
     
     private func delete(forKey key: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "mangadex.auth"
         ]
+        
         SecItemDelete(query as CFDictionary)
     }
 }

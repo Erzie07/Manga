@@ -7,7 +7,22 @@ class AuthenticationManager: ObservableObject {
     let keychainHelper = KeychainHelper()
     private let defaults = UserDefaults.standard
     
-    // Nested error type
+    init() {
+        restoreAuthenticationState()
+    }
+    
+    // Define ErrorResponse inside the class
+    struct ErrorResponse: Codable {
+        let error: String
+        let errorDescription: String
+        
+        enum CodingKeys: String, CodingKey {
+            case error
+            case errorDescription = "error_description"
+        }
+    }
+    
+    
     enum AuthError: Error, LocalizedError {
         case invalidCredentials
         case networkError
@@ -34,179 +49,15 @@ class AuthenticationManager: ObservableObject {
         }
     }
     
-    init() {
-        restoreAuthenticationState()
-    }
-    
-    private func restoreAuthenticationState() {
-        // If we have both tokens and a saved username, restore the authenticated state
-        if let accessToken = keychainHelper.getAccessToken(),
-           let refreshToken = keychainHelper.getRefreshToken(),
-           let savedUsername = defaults.string(forKey: "currentUser") {
-            
-            // Validate the access token and refresh if needed
-            Task {
-                do {
-                    if await shouldRefreshToken() {
-                        try await refreshAccessToken()
-                    }
-                    
-                    // Update the authentication state on success
-                    await MainActor.run {
-                        self.isAuthenticated = true
-                        self.currentUser = savedUsername
-                    }
-                } catch {
-                    // If token refresh fails, clear everything and require new login
-                    await MainActor.run {
-                        self.logout()
-                    }
-                }
-            }
-        }
-    }
-    
-    private func shouldRefreshToken() async -> Bool {
-        // Verify the current access token
-        guard let accessToken = keychainHelper.getAccessToken() else {
-            return true
-        }
-        
-        // Make a test request to check token validity
-        let url = URL(string: "https://api.mangadex.org/auth/check")!
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            return (response as? HTTPURLResponse)?.statusCode == 401
-        } catch {
-            return true
-        }
-    }
-    
-        func refreshAccessToken() async throws {
-            // Get the current refresh token
-            guard let refreshToken = keychainHelper.getRefreshToken() else {
-                throw AuthError.refreshFailed
-            }
-            
-            let url = URL(string: "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            
-            // Get stored client credentials
-            guard let clientId = UserDefaults.standard.string(forKey: "lastClientId"),
-                  let clientSecret = UserDefaults.standard.string(forKey: "lastClientSecret") else {
-                throw AuthError.refreshFailed
-            }
-            
-            // Prepare the refresh token request body
-            let bodyParams = [
-                "grant_type": "refresh_token",
-                "refresh_token": refreshToken,
-                "client_id": clientId,
-                "client_secret": clientSecret
-            ]
-            
-            let bodyString = bodyParams
-                .map { key, value in
-                    let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
-                    let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
-                    return "\(encodedKey)=\(encodedValue)"
-                }
-                .joined(separator: "&")
-            
-            request.httpBody = bodyString.data(using: .utf8)
-            
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw AuthError.networkError
-                }
-                
-                if httpResponse.statusCode == 200 {
-                    let authResponse = try JSONDecoder().decode(AuthResponse.self, from: data)
-                    
-                    // Update stored tokens
-                    await MainActor.run {
-                        self.keychainHelper.saveAccessToken(authResponse.accessToken)
-                        self.keychainHelper.saveRefreshToken(authResponse.refreshToken)
-                    }
-                } else {
-                    throw AuthError.refreshFailed
-                }
-            } catch {
-                throw AuthError.refreshFailed
-            }
-        }
-    
-    func login(credentials: LoginCredentials) async throws {
-        // Store client credentials for future token refreshes
-        UserDefaults.standard.set(credentials.clientId, forKey: "lastClientId")
-        UserDefaults.standard.set(credentials.clientSecret, forKey: "lastClientSecret")
-        
-        let url = URL(string: "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        
-        let bodyParams = [
-            "grant_type": "password",
-            "username": credentials.username,
-            "password": credentials.password,
-            "client_id": credentials.clientId,
-            "client_secret": credentials.clientSecret
-        ]
-        
-        let bodyString = bodyParams
+    private func encodeFormData(_ parameters: [String: String]) -> Data {
+        let bodyString = parameters
             .map { key, value in
                 let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
                 let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
                 return "\(encodedKey)=\(encodedValue)"
             }
             .joined(separator: "&")
-        
-        request.httpBody = bodyString.data(using: .utf8)
-        
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw AuthError.networkError
-            }
-            
-            switch httpResponse.statusCode {
-            case 200:
-                let decoder = JSONDecoder()
-                let authResponse = try decoder.decode(AuthResponse.self, from: data)
-                await MainActor.run {
-                    self.keychainHelper.saveAccessToken(authResponse.accessToken)
-                    self.keychainHelper.saveRefreshToken(authResponse.refreshToken)
-                    self.defaults.set(credentials.username, forKey: "currentUser")
-                    self.isAuthenticated = true
-                    self.currentUser = credentials.username
-                }
-                
-            case 401:
-                throw AuthError.invalidCredentials
-                
-            default:
-                if let errorData = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let errorMessage = errorData["error_description"] as? String {
-                    throw AuthError.serverError(errorMessage)
-                } else {
-                    throw AuthError.serverError("Status code: \(httpResponse.statusCode)")
-                }
-            }
-            
-        } catch let error as AuthError {
-            throw error
-        } catch {
-            throw AuthError.networkError
-        }
+        return bodyString.data(using: .utf8) ?? Data()
     }
     
     func logout() {
@@ -216,5 +67,180 @@ class AuthenticationManager: ObservableObject {
         defaults.removeObject(forKey: "lastClientSecret")
         isAuthenticated = false
         currentUser = nil
+    }
+    
+    private func restoreAuthenticationState() {
+        if let accessToken = keychainHelper.getAccessToken(),
+           let refreshToken = keychainHelper.getRefreshToken(),
+           let savedUsername = defaults.string(forKey: "currentUser") {
+            
+            // Validate tokens and refresh if needed
+            Task {
+                do {
+                    try await validateAndRefreshTokenIfNeeded()
+                    await MainActor.run {
+                        self.isAuthenticated = true
+                        self.currentUser = savedUsername
+                    }
+                } catch {
+                    print("Failed to restore auth state: \(error)")
+                    await MainActor.run {
+                        self.logout()
+                    }
+                }
+            }
+        }
+    }
+    
+    func validateAndRefreshTokenIfNeeded() async throws {
+        guard let token = keychainHelper.getAccessToken() else {
+            throw AuthError.tokenExpired
+        }
+        
+        let url = URL(string: "https://api.mangadex.org/auth/check")!
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        if let httpResponse = response as? HTTPURLResponse {
+            if httpResponse.statusCode == 401 {
+                // Token expired, refresh it
+                try await refreshAccessToken()
+            } else if httpResponse.statusCode != 200 {
+                throw AuthError.serverError("Token validation failed")
+            }
+        }
+    }
+    
+    func login(credentials: LoginCredentials) async throws {
+        let url = URL(string: "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token")!
+        
+        let parameters = [
+            "grant_type": "password",
+            "username": credentials.username,
+            "password": credentials.password,
+            "client_id": credentials.clientId,
+            "client_secret": credentials.clientSecret
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = encodeFormData(parameters)
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AuthError.networkError
+            }
+            
+            if httpResponse.statusCode == 200 {
+                // First try to decode without any key decoding strategy
+                let decoder = JSONDecoder()
+                
+                do {
+                    let authResponse = try decoder.decode(AuthResponse.self, from: data)
+                    
+                    await MainActor.run {
+                        self.keychainHelper.saveAccessToken(authResponse.accessToken)
+                        if let refreshToken = authResponse.refreshToken {
+                            self.keychainHelper.saveRefreshToken(refreshToken)
+                        }
+                        self.defaults.set(credentials.username, forKey: "currentUser")
+                        self.defaults.set(credentials.clientId, forKey: "lastClientId")
+                        self.defaults.set(credentials.clientSecret, forKey: "lastClientSecret")
+                        self.isAuthenticated = true
+                        self.currentUser = credentials.username
+                    }
+                } catch {
+                    // Log the error for debugging
+                    print("Decoding error: \(error)")
+                    
+                    // Let's try to decode it manually as a fallback
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let accessToken = json["access_token"] as? String,
+                       let refreshToken = json["refresh_token"] as? String {
+                        
+                        await MainActor.run {
+                            self.keychainHelper.saveAccessToken(accessToken)
+                            self.keychainHelper.saveRefreshToken(refreshToken)
+                            self.defaults.set(credentials.username, forKey: "currentUser")
+                            self.defaults.set(credentials.clientId, forKey: "lastClientId")
+                            self.defaults.set(credentials.clientSecret, forKey: "lastClientSecret")
+                            self.isAuthenticated = true
+                            self.currentUser = credentials.username
+                        }
+                    } else {
+                        throw AuthError.serverError("Failed to decode response")
+                    }
+                }
+            } else {
+                if let errorData = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                    throw AuthError.serverError(errorData.errorDescription)
+                } else {
+                    throw AuthError.serverError("Login failed with status code: \(httpResponse.statusCode)")
+                }
+            }
+        } catch let error as AuthError {
+            throw error
+        } catch {
+            print("Unexpected error during login: \(error)")
+            throw AuthError.networkError
+        }
+    }
+    
+    
+    func refreshAccessToken() async throws {
+        guard let refreshToken = keychainHelper.getRefreshToken(),
+              let clientId = defaults.string(forKey: "lastClientId"),
+              let clientSecret = defaults.string(forKey: "lastClientSecret") else {
+            throw AuthError.refreshFailed
+        }
+        
+        let url = URL(string: "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token")!
+        let parameters = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientId,
+            "client_secret": clientSecret
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = encodeFormData(parameters)
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AuthError.networkError
+            }
+            
+            if httpResponse.statusCode == 200 {
+                let decoder = JSONDecoder()
+                let authResponse = try decoder.decode(AuthResponse.self, from: data)
+                
+                await MainActor.run {
+                    self.keychainHelper.saveAccessToken(authResponse.accessToken)
+                    if let newRefreshToken = authResponse.refreshToken {
+                        self.keychainHelper.saveRefreshToken(newRefreshToken)
+                    }
+                    self.isAuthenticated = true
+                }
+            } else {
+                await MainActor.run {
+                    self.logout()
+                }
+                throw AuthError.refreshFailed
+            }
+        } catch {
+            await MainActor.run {
+                self.logout()
+            }
+            throw AuthError.refreshFailed
+        }
     }
 }

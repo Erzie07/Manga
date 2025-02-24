@@ -79,42 +79,52 @@ struct LoginView: View {
             }
         }
     }
-    
     private var isFormValid: Bool {
-        !username.isEmpty && !password.isEmpty &&
-        !clientId.isEmpty && !clientSecret.isEmpty
-    }
-    
-    private func login() {
-        isLoading = true
-        let credentials = LoginCredentials(
-            username: username,
-            password: password,
-            clientId: clientId,
-            clientSecret: clientSecret
-        )
+            !username.isEmpty && !password.isEmpty &&
+            !clientId.isEmpty && !clientSecret.isEmpty
+        }
         
-        Task {
-            do {
-                try await authManager.login(credentials: credentials)
-            } catch let error as AuthenticationManager.AuthError {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    showingError = true
+        private func encodeFormData(_ parameters: [String: String]) -> Data {
+            let bodyString = parameters
+                .map { key, value in
+                    let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
+                    let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+                    return "\(encodedKey)=\(encodedValue)"
                 }
-            } catch {
-                await MainActor.run {
-                    errorMessage = "An unexpected error occurred"
-                    showingError = true
-                }
-            }
+                .joined(separator: "&")
+            return bodyString.data(using: .utf8) ?? Data()
+        }
+        
+        private func login() {
+            isLoading = true
+            let credentials = LoginCredentials(
+                username: username,
+                password: password,
+                clientId: clientId,
+                clientSecret: clientSecret
+            )
             
-            await MainActor.run {
-                isLoading = false
+            Task {
+                do {
+                    try await authManager.login(credentials: credentials)
+                } catch let error as AuthenticationManager.AuthError {
+                    await MainActor.run {
+                        errorMessage = error.localizedDescription
+                        showingError = true
+                    }
+                } catch {
+                    await MainActor.run {
+                        errorMessage = "An unexpected error occurred"
+                        showingError = true
+                    }
+                }
+                
+                await MainActor.run {
+                    isLoading = false
+                }
             }
         }
     }
-}
 
 struct UserProfileView: View {
     @ObservedObject var authManager: AuthenticationManager
@@ -594,63 +604,63 @@ class FollowsManager: ObservableObject {
     }
 
 struct FollowButton: View {
-        @ObservedObject var followsManager: FollowsManager
-        let manga: Manga
-        @State private var isLoading = false
-        @State private var showError = false
-        @State private var errorMessage = ""
-        @State private var isFollowing = false
-        
-        var body: some View {
-            Button(action: handleFollow) {
-                HStack {
-                    if isLoading {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                            .frame(width: 20, height: 20)
-                    } else {
-                        Image(systemName: isFollowing ? "heart.fill" : "heart")
-                    }
-                    Text(isFollowing ? "Following" : "Follow")
+    @ObservedObject var followsManager: FollowsManager
+    let manga: Manga
+    @State private var isLoading = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+    @State private var isFollowing = false
+    
+    var body: some View {
+        Button(action: handleFollow) {
+            HStack {
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .frame(width: 20, height: 20)
+                } else {
+                    Image(systemName: isFollowing ? "heart.fill" : "heart")
                 }
-                .foregroundColor(isFollowing ? .red : .blue)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(.systemBackground))
-                .cornerRadius(20)
-                .shadow(radius: 2)
+                Text(isFollowing ? "Following" : "Follow")
             }
-            .disabled(isLoading)
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
-            }
-            .onAppear {
-                // Check if manga is in followedManga dictionary
-                isFollowing = followsManager.followedManga[manga.id] != nil
-            }
+            .foregroundColor(isFollowing ? .red : .blue)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(.systemBackground))
+            .cornerRadius(20)
+            .shadow(radius: 2)
         }
+        .disabled(isLoading)
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+        .onAppear {
+            // Check if manga is in followedManga dictionary
+            isFollowing = followsManager.followedManga[manga.id] != nil
+        }
+    }
+    
+    private func handleFollow() {
+        guard !isLoading else { return }
+        isLoading = true
         
-        private func handleFollow() {
-            guard !isLoading else { return }
-            isLoading = true
-            
-            Task {
-                do {
-                    try await followsManager.toggleFollow(manga: manga)
-                    await MainActor.run {
-                        isFollowing.toggle()
-                    }
-                } catch {
-                    await MainActor.run {
-                        errorMessage = error.localizedDescription
-                        showError = true
-                    }
-                }
+        Task {
+            do {
+                try await followsManager.toggleFollow(manga: manga)
                 await MainActor.run {
-                    isLoading = false
+                    isFollowing.toggle()
                 }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+            await MainActor.run {
+                isLoading = false
             }
         }
     }
+}

@@ -86,68 +86,78 @@ struct MangaDetailView: View {
                     .padding(.horizontal)
                 }
                 
-                // Chapters Section
+                // Search and Sort Controls
                 VStack(spacing: 16) {
-                                   TextField("Search chapters...", text: $viewModel.searchText)
-                                       .textFieldStyle(RoundedBorderTextFieldStyle())
-                                       .padding(.horizontal)
-                                   
-                                   Picker("Sort Order", selection: $viewModel.sortOrder) {
-                                       Text("Newest First").tag(ChapterListViewModel.SortOrder.desc)
-                                       Text("Oldest First").tag(ChapterListViewModel.SortOrder.asc)
-                                   }
-                                   .pickerStyle(SegmentedPickerStyle())
-                                   .padding(.horizontal)
-                               }
-                               .padding(.top)
-                               
-                               // Chapters List
-                               VStack(alignment: .leading, spacing: 8) {
-                                   Text("Chapters")
-                                       .font(.headline)
-                                       .padding(.horizontal)
-                                   
-                                   if viewModel.isLoading && viewModel.chapters.isEmpty {
-                                       ProgressView()
-                                           .frame(maxWidth: .infinity)
-                                           .padding()
-                                   } else if viewModel.chapters.isEmpty {
-                                       Text("No chapters found")
-                                           .frame(maxWidth: .infinity)
-                                           .padding()
-                                           .foregroundColor(.secondary)
-                                   } else {
-                                       LazyVStack(spacing: 0) {
-                                           ForEach(viewModel.chapters) { chapter in
-                                               NavigationLink(destination: PagedChapterReaderView(chapter: chapter)) {
-                                                   ChapterRowView(chapter: chapter)
-                                                       .padding(.horizontal)
-                                                       .padding(.vertical, 8)
-                                               }
-                                               Divider()
-                                           }
-                                           
-                                           if viewModel.hasMoreChapters {
-                                               ProgressView()
-                                                   .frame(maxWidth: .infinity)
-                                                   .padding()
-                                                   .onAppear {
-                                                       Task {
-                                                           await viewModel.loadChapters()
-                                                       }
-                                                   }
-                                           }
-                                       }
-                                   }
-                               }
-                           }
-                       }
-                       .navigationBarTitleDisplayMode(.inline)
-                       .task {
-                           await viewModel.resetAndLoadChapters()
-                       }
-                       .refreshable {
-                           await viewModel.resetAndLoadChapters()
-                       }
-                   }
-               }
+                    TextField("Search chapters...", text: $viewModel.searchText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .padding(.horizontal)
+                    
+                    Picker("Sort Order", selection: $viewModel.sortOrder) {
+                        Text("Newest First").tag(ChapterListViewModel.SortOrder.desc)
+                        Text("Oldest First").tag(ChapterListViewModel.SortOrder.asc)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.horizontal)
+                }
+                .padding(.top)
+                
+                // Chapters Section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Chapters")
+                        .font(.headline)
+                        .padding(.horizontal)
+                    
+                    // Loading and Empty States
+                    Group {
+                        if viewModel.isLoading {
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                Text("Loading chapters...")
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                        } else if viewModel.chapters.isEmpty {
+                            VStack(spacing: 16) {
+                                Image(systemName: "book.closed")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(.secondary)
+                                Text("No chapters found")
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                        } else {
+                            LazyVStack(spacing: 0) {
+                                ForEach(viewModel.chapters) { chapter in
+                                    NavigationLink(destination: PagedChapterReaderView(chapter: chapter)) {
+                                        ChapterRowView(chapter: chapter)
+                                            .padding(.horizontal)
+                                            .padding(.vertical, 8)
+                                    }
+                                    Divider()
+                                }
+                                
+                                if viewModel.hasMoreChapters {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .onAppear {
+                                            Task {
+                                                await viewModel.loadChapters()
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await viewModel.resetAndLoadChapters()
+        }
+        .refreshable {
+            await viewModel.resetAndLoadChapters()
+        }
+    }
+}
